@@ -1,0 +1,6 @@
+Computation finished. Found 5 intersecting elements:
+com.whatsapp
+org.meowcat.edxposed.manager
+com.google.android.apps.maps
+com.android.chrome
+com.delaware.empark

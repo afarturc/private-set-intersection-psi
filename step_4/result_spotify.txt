@@ -1,0 +1,5 @@
+Hashing 601 elements with arbitrary length into into 8 bytes
+Client: bins = 722, elebitlen = 55 and maskbitlen = 64 and performs 722 OTs
+Computation finished. Found 2 intersecting elements:
+4nKRZAONxGgcKCMin730Ai
+63T7DJ1AFDD6Bn8VzG6JE8

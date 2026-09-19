@@ -1,140 +1,208 @@
-# Assignment 2 — Notas
+# Private Set Intersection — Protocols, Benchmarks and a Real-World Case Study
 
-## Step 2
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Report](https://img.shields.io/badge/report-PDF-b31b1b.svg)](report/main.pdf)
+![Python](https://img.shields.io/badge/python-3.10%2B-3776ab.svg)
+![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)
 
-### Ex. 1 e 2 — naive hashing com input simples
+Two parties each hold a private set. They want to learn **only** which elements
+they have in common — and nothing else about each other's data. That is
+**Private Set Intersection (PSI)**, a practical instance of Secure Multiparty
+Computation.
 
-Inputs: `step_2/input` = `up202509273` · `step_2/input2` = `test`.
+This repository studies four PSI protocols, measures what they actually cost on
+the wire and on the CPU, verifies with a packet analyser that they leak what the
+theory says they leak, and finally applies the strongest of them to a real
+problem: finding the songs two people both like, without either revealing their
+music library.
 
-- **Ex. 1**: ambos os terminais com `input`. Output: "Found 1 intersecting elements: up202509273". Hashes "my" e "partner" iguais (`478ed603b634`). Screenshot: `screenshots/Screenshot From 2026-04-16 11-46-17.png`.
-- **Ex. 2**: `input` vs `input2`. Output: "Found 0 intersecting elements". Hashes diferentes. Screenshot: `screenshots/Screenshot From 2026-04-16 11-51-28.png`.
-- Verificação manual: `echo -n up202509273 | sha256sum | cut -c -12` → `478ed603b634` (confirma sha256 truncado a 6 bytes). Screenshot: `screenshots/Screenshot From 2026-04-16 12-04-26.png`.
+Coursework for *Privacy Enhancing Technologies* (Tecnologias de Reforço da
+Privacidade), MSc in Information Security, Faculty of Sciences, University of
+Porto. Full written report (in Portuguese): **[`report/main.pdf`](report/main.pdf)**.
 
-### Ex. 3 — inspecção dos pacotes naive (verificação dos hashes)
+---
 
-Inputs: `step_2/input` = `up202509273`; `step_2/input2` = `test`.
+## The four protocols
 
-Hashes esperados (sha256 truncado a 6 bytes):
+Implementations come from the [PSI suite](https://github.com/encryptogroup/PSI)
+by the Cryptography and Privacy Engineering Group at TU Darmstadt.
 
-- `up202509273` → `478ed603b634`
-- `test` → `9f86d081884c`
+| # | Protocol | Idea | What it leaks | Reference |
+|---|----------|------|---------------|-----------|
+| 0 | **Naive hashing** | Exchange truncated hashes of each element and intersect locally | Everything — hashes of low-entropy inputs are trivially brute-forced | — |
+| 1 | **Server-aided** | An untrusted third party matches blinded elements for both sides | Nothing to the parties; requires the server not to collude | Kamara et al. |
+| 2 | **Diffie–Hellman** | Both parties exponentiate each other's hashed elements with a secret key | Nothing beyond the intersection | Meadows |
+| 3 | **OT-based** | Oblivious transfer extension + hashing to bins | Nothing beyond the intersection | Pinkas et al. |
 
-Capturas:
+The protocol number is the `-p` flag of the PSI binaries.
 
-- `step_2/3.1.pcapng` — ambos os terminais com `input`. 35 pacotes, 3 968 bytes. Hash `478ed603b634` aparece 2× (um pacote em cada direção, port 7766) → intersecção encontrada.
-- `step_2/3.2.pcapng` — `input` vs `input2`. 30 pacotes, 3 508 bytes. Cada hash aparece 1× em direções opostas → sem intersecção, confirma que só os hashes truncados são trocados.
+## Key findings
 
-### Ex. 5 — Naive hashing (-p 0) com AppList1.csv vs AppList2.csv
+**Security is not free, but the price is not where you would guess.** The naive
+protocol is the cheapest and the only insecure one — but the two secure
+protocols trade off in *opposite* directions:
 
-Intersecção (5 elementos):
+- **Diffie–Hellman** keeps communication low (~10 MB at n = 100 000) but spends
+  a public-key exponentiation per element: **45 s at n = 100 000**, growing
+  linearly and steeply.
+- **OT-based** stays at **0.4 s for the same 100 000 elements** — its cost is a
+  fixed base-OT setup, so the curve is nearly flat — but it pushes ~10 MB and
+  grows faster in bandwidth.
 
-- com.whatsapp
-- org.meowcat.edxposed.manager
-- com.google.android.apps.maps
-- com.android.chrome
-- com.delaware.empark
+The practical rule that falls out: **OT-based PSI for large sets or
+CPU-constrained parties, Diffie–Hellman when bandwidth is the scarce resource.**
 
-Captura (`step_2/5.pcapng`):
+<p align="center">
+  <img src="experiments/02-benchmarks/time_vs_n.png" width="49%" alt="Execution time vs set size">
+  <img src="experiments/02-benchmarks/data_vs_n.png" width="49%" alt="Data exchanged vs set size">
+</p>
 
-- Pacotes: 31
-- Total capturado: 4016 bytes (data: 2613 bytes)
+**The leakage is observable.** Capturing the naive protocol in Wireshark shows
+the 6-byte truncated SHA-256 digests travelling in the clear on port 7766;
+`echo -n up202509273 | sha256sum | cut -c -12` reproduces the exact value seen in
+the packet. Nothing else is exchanged — which is precisely why the protocol is
+broken for any enumerable input domain.
 
-### Ex. 6 — Server-aided (-p 1)
+---
 
-Bug do protocolo: as listas têm de ter o mesmo tamanho. AppList2 (34) foi paddada para 36 linhas com 2 emails fake de `emails_alice.txt` (`step_2/AppList{1,2}_padded.csv`).
+## Repository structure
 
-Intersecção (mesmos 5 elementos do ex. 5) — `step_2/server_aided_intersection.txt`.
-
-Captura (`step_2/6.pcapng`):
-
-- Pacotes: 32
-- Total capturado: 4768 bytes (data: 3330 bytes)
-
-### Ex. 8 — Diffie-Hellman PSI (-p 2)
-
-Intersecção (mesmos 5 elementos) — `step_2/dh_intersection.txt`.
-
-Captura (`step_2/8.pcapng`):
-
-- Pacotes: 30
-- Total capturado: 7084 bytes (data: 5714 bytes)
-
-### Ex. 9 — OT-based PSI (-p 3)
-
-Intersecção (mesmos 5 elementos) — `step_2/ot_intersection.txt`.
-
-Captura (`step_2/9.pcapng`):
-
-- Pacotes: 36
-- Total capturado: 56580 bytes (data: 55006 bytes)
-
-### Ex. 10 — Comparação (segurança vs custo de comunicação)
-
-| Protocolo | Pacotes | Bytes capturados |
-|---|---|---|
-| Naive hashing (-p 0) | 31 | 4 016 |
-| Server-aided (-p 1) | 32 | 4 768 |
-| Diffie-Hellman (-p 2) | 30 | 7 084 |
-| OT-based (-p 3) | 36 | 56 580 |
-
-## Step 3 — Benchmarks (psi.exe, -b 16)
-
-Script: `step_3/bench.sh` · resultados: `step_3/results.csv` · plots: `step_3/time_vs_n.png`, `step_3/data_vs_n.png`.
-
-Tamanhos testados: 50, 100, 500, 1 000, 5 000, 10 000, 50 000, 100 000.
-
-| Protocolo | n | tempo (s) | sent (MB) | recv (MB) | total (MB) |
-|---|---:|---:|---:|---:|---:|
-| Naive (0) | 50 | 0.0 | 0.0 | 0.0 | 0.0 |
-| Naive (0) | 100 | 0.0 | 0.0 | 0.0 | 0.0 |
-| Naive (0) | 500 | 0.0 | 0.0 | 0.0 | 0.0 |
-| Naive (0) | 1 000 | 0.0 | 0.0 | 0.0 | 0.0 |
-| Naive (0) | 5 000 | 0.0 | 0.0 | 0.0 | 0.0 |
-| Naive (0) | 10 000 | 0.0 | 0.1 | 0.1 | 0.2 |
-| Naive (0) | 50 000 | 0.1 | 0.4 | 0.4 | 0.8 |
-| Naive (0) | 100 000 | 0.3 | 1.0 | 1.0 | 2.0 |
-| DH (2) | 50 | 0.0 | 0.0 | 0.0 | 0.0 |
-| DH (2) | 100 | 0.0 | 0.0 | 0.0 | 0.0 |
-| DH (2) | 500 | 0.2 | 0.0 | 0.0 | 0.0 |
-| DH (2) | 1 000 | 0.4 | 0.0 | 0.1 | 0.1 |
-| DH (2) | 5 000 | 2.1 | 0.2 | 0.3 | 0.5 |
-| DH (2) | 10 000 | 4.3 | 0.4 | 0.7 | 1.1 |
-| DH (2) | 50 000 | 22.2 | 1.8 | 3.3 | 5.1 |
-| DH (2) | 100 000 | 44.6 | 3.5 | 6.6 | 10.1 |
-| OT (3) | 50 | 0.2 | 0.0 | 0.0 | 0.0 |
-| OT (3) | 100 | 0.2 | 0.0 | 0.0 | 0.0 |
-| OT (3) | 500 | 0.2 | 0.1 | 0.0 | 0.1 |
-| OT (3) | 1 000 | 0.2 | 0.1 | 0.0 | 0.1 |
-| OT (3) | 5 000 | 0.2 | 0.4 | 0.1 | 0.5 |
-| OT (3) | 10 000 | 0.2 | 0.8 | 0.3 | 1.1 |
-| OT (3) | 50 000 | 0.3 | 3.7 | 1.3 | 5.0 |
-| OT (3) | 100 000 | 0.4 | 7.3 | 2.9 | 10.2 |
-
-Observações rápidas:
-- **Naive**: mais rápido e menos comunicação, mas inseguro.
-- **DH**: pouca comunicação mas tempo cresce muito (exponenciações por elemento → ~45 s para 100k).
-- **OT**: tempo quase constante (overhead inicial dominante), mas mais dados trocados — escala bem em CPU.
-
-## Step 4 — PSI sobre Liked Songs do Spotify (Artur vs Tiago)
-
-Caso de uso real com partner: cada lado exporta as suas Liked Songs do Spotify (`step_4/Liked_Songs_Artur.csv`, `step_4/Liked_Songs_Tiago.csv`) e queremos descobrir as músicas em comum sem revelar o resto da biblioteca.
-
-`step_4/extract_tracks.py` extrai o ID de 22 chars do `Track URI` (`spotify:track:<id>`), um por linha. As listas têm tamanhos diferentes (Artur: 579, Tiago: 601) e o protocolo exige n igual nos dois lados (mesmo bug do step 2 ex 6), por isso a Artur foi paddada para 601 com 22 IDs fake aleatórios prefixados com `FAKE`.
-
-Protocolo: **OT-based (-p 3)** com `demo.exe -f`, consistente com o critério do step 3 para n na ordem das centenas/milhares.
-
-Comandos:
-
-```bash
-python3 extract_tracks.py --in Liked_Songs_Artur.csv --out artur_ids.txt --pad-to 601
-python3 extract_tracks.py --in Liked_Songs_Tiago.csv --out tiago_ids.txt --pad-to 601
-# terminal 1: ./demo.exe -r 0 -p 3 -f artur_ids.txt
-# terminal 2: ./demo.exe -r 1 -p 3 -f tiago_ids.txt
+```
+├── data/                            # The two app-list datasets used in the experiments
+├── docs/
+│   ├── assignment-brief.pdf         # Original assignment specification
+│   └── papers/                      # Reference papers for the protocols
+├── experiments/
+│   ├── 01-protocol-experiments/     # Running all 4 protocols + traffic analysis
+│   │   ├── inputs/                  # Inputs fed to the PSI binary
+│   │   ├── captures/                # Wireshark captures (.pcapng) and packet dumps
+│   │   └── outputs/                 # Computed intersections, per protocol
+│   ├── 02-benchmarks/               # Scaling study: n from 50 to 100 000
+│   │   ├── bench.sh                 # Measurement harness
+│   │   ├── plot.py                  # Produces the two plots above
+│   │   └── results.csv              # Raw measurements
+│   └── 03-spotify-psi/              # Case study on real Spotify libraries
+│       ├── extract_tracks.py        # CSV export -> track-ID list (with padding)
+│       ├── exports/                 # Liked Songs CSV exports of both parties
+│       ├── inputs/                  # Extracted track IDs
+│       └── outputs/                 # PSI result + plaintext cross-check
+└── report/                          # LaTeX sources and compiled report
 ```
 
-Resultado (`step_4/result_spotify.txt`): **2 elementos intersectados**, validados contra `comm -12` em plaintext (`step_4/plaintext_intersection.txt`):
+---
 
-- `4nKRZAONxGgcKCMin730Ai` — *33 Max Verstappen* (Carte Blanq; Nils Van Zandt; Maxx Power)
-- `63T7DJ1AFDD6Bn8VzG6JE8` — *Paint It, Black* (The Rolling Stones)
+## Experiment 1 — Running the protocols and watching the traffic
 
-Privacidade: cada parte só aprende as 2 músicas em comum; as restantes ~577 e ~599 ficam privadas. Os IDs `FAKE...` do padding nunca colidem com IDs base62 reais.
+All four protocols were run on the same pair of app lists (36 and 34 entries) and
+all four agreed on the same 5-element intersection:
+
+```
+com.whatsapp · org.meowcat.edxposed.manager · com.google.android.apps.maps
+com.android.chrome · com.delaware.empark
+```
+
+Traffic captured for each run, same input, same result:
+
+| Protocol | Packets | Bytes captured |
+|---|---:|---:|
+| Naive hashing (`-p 0`) | 31 | 4 016 |
+| Server-aided (`-p 1`) | 32 | 4 768 |
+| Diffie–Hellman (`-p 2`) | 30 | 7 084 |
+| OT-based (`-p 3`) | 36 | 56 580 |
+
+The OT-based protocol costs an order of magnitude more bandwidth at this scale —
+its base-OT setup dominates when n is small, which is exactly the constant term
+that makes it win at n = 100 000.
+
+> **Implementation quirk found along the way:** the server-aided protocol
+> requires both parties to submit sets of *equal* size. `AppList2.csv` (34 rows)
+> was padded to 36 with filler entries; the padded inputs are kept in
+> `experiments/01-protocol-experiments/inputs/`.
+
+## Experiment 2 — Scaling
+
+`bench.sh` runs both roles of `psi.exe` for protocols 0, 2 and 3 across
+n ∈ {50, 100, 500, 1 000, 5 000, 10 000, 50 000, 100 000}, parsing the binary's
+own timing and byte counters. Selected rows from [`results.csv`](experiments/02-benchmarks/results.csv):
+
+| Protocol | n = 1 000 | n = 10 000 | n = 100 000 |
+|---|---|---|---|
+| Naive | 0.0 s · 0.0 MB | 0.0 s · 0.2 MB | 0.3 s · 2.0 MB |
+| Diffie–Hellman | 0.4 s · 0.1 MB | 4.3 s · 1.1 MB | **44.6 s** · 10.1 MB |
+| OT-based | 0.2 s · 0.1 MB | 0.2 s · 1.1 MB | **0.4 s** · 10.2 MB |
+
+## Experiment 3 — Which songs do we both like?
+
+A genuine two-party run with a real partner. Each side exported their Spotify
+**Liked Songs** (579 and 601 tracks) and wanted the overlap without disclosing
+the rest of their library.
+
+```bash
+cd experiments/03-spotify-psi
+python3 extract_tracks.py --in exports/liked_songs_artur.csv --out inputs/artur_ids.txt --pad-to 601
+python3 extract_tracks.py --in exports/liked_songs_tiago.csv --out inputs/tiago_ids.txt --pad-to 601
+
+# terminal 1 (receiver)          # terminal 2 (sender)
+./demo.exe -r 0 -p 3 -f artur_ids.txt
+                                 ./demo.exe -r 1 -p 3 -f tiago_ids.txt
+```
+
+`extract_tracks.py` pulls the 22-character base62 ID out of each
+`spotify:track:<id>` URI, de-duplicates, and pads the shorter list to a common
+size with `FAKE`-prefixed identifiers that cannot collide with real base62 IDs —
+working around the equal-size requirement without perturbing the result.
+
+**Result: 2 tracks in common**, matching a plaintext `comm -12` cross-check:
+
+| Track ID | Song |
+|---|---|
+| `4nKRZAONxGgcKCMin730Ai` | *33 Max Verstappen* — Carte Blanq, Nils Van Zandt, Maxx Power |
+| `63T7DJ1AFDD6Bn8VzG6JE8` | *Paint It, Black* — The Rolling Stones |
+
+Each side learned those two songs and nothing about the other ~577 and ~599.
+
+---
+
+## Reproducing
+
+**Prerequisites** (Linux only — the PSI suite does not build elsewhere):
+
+```bash
+sudo apt install -y g++ make libgmp-dev libglib2.0-dev libssl-dev wireshark
+git clone --recursive https://github.com/encryptogroup/PSI && cd PSI && make
+```
+
+**Run a protocol** — receiver first, in two terminals:
+
+```bash
+./demo.exe -r 0 -p <0|1|2|3> -f <file>
+./demo.exe -r 1 -p <0|1|2|3> -f <file>
+```
+
+**Reproduce the benchmarks and plots:**
+
+```bash
+PSI_DIR=~/PSI experiments/02-benchmarks/bench.sh
+python3 experiments/02-benchmarks/plot.py
+```
+
+**Rebuild the report** (requires XeLaTeX, uses `latexmk`):
+
+```bash
+cd report && latexmk
+```
+
+---
+
+## References
+
+1. B. Pinkas, T. Schneider, M. Zohner. *Scalable Private Set Intersection Based on OT Extension.* ACM TOPS, 2018. — [`docs/papers/2016-930.pdf`](docs/papers/2016-930.pdf)
+2. S. Kamara, P. Mohassel, M. Raykova, S. Sadeghian. *Scaling Private Set Intersection to Billion-Element Sets.* — [`docs/papers/sapsi.pdf`](docs/papers/sapsi.pdf)
+3. C. Meadows. *A More Efficient Cryptographic Matchmaking Protocol for Use in the Absence of a Continuously Available Third Party.* IEEE S&P, 1986. — [`docs/papers/`](docs/papers/)
+4. [encryptogroup/PSI](https://github.com/encryptogroup/PSI) — the protocol implementations benchmarked here.
+
+## Authors
+
+Artur Correia · Tiago Pinheiro — MSc Information Security, FCUP.
+
+Licensed under the [MIT License](LICENSE).

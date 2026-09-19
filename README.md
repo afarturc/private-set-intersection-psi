@@ -205,4 +205,6 @@ cd report && latexmk
 
 Artur Correia · Tiago Pinheiro — MSc Information Security, FCUP.
 
-Licensed under the [MIT License](LICENSE).
+Code and scripts are licensed under the [MIT License](LICENSE). The written
+report is authored coursework shared for reference; the PDFs under
+`docs/papers/` remain under their original authors' and publishers' copyright.
